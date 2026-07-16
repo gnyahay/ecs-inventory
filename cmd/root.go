@@ -14,8 +14,6 @@ import (
 	"github.com/anchore/ecs-inventory/pkg/reporter"
 )
 
-var ErrMissingDefaultConfigValue = fmt.Errorf("missing default config value")
-
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "anchore-ecs-inventory",
@@ -33,13 +31,12 @@ var rootCmd = &cobra.Command{
 		}
 		log.Info("Starting anchore-ecs-inventory")
 
-		// Check required config values are present
-		if appConfig.Region == "" {
-			log.Error(
-				"AWS region not specified, please set the ANCHORE_ECS_INVENTORY_REGION environment variable, use the --region flag, or specify a region in the config file",
-				ErrMissingDefaultConfigValue,
+		// Region is optional. When no roles are assumed and no region is set, warn but continue -
+		// the AWS SDK may still resolve a region from the environment or instance metadata.
+		if appConfig.Region == "" && len(appConfig.AssumeRole) == 0 {
+			log.Warn(
+				"No region or assume-role configured; relying on AWS SDK default region resolution (e.g. AWS_REGION or instance metadata)",
 			)
-			os.Exit(1)
 		}
 
 		// Validate anchore connection & credentials, using a dummy report to post but this will be
@@ -63,8 +60,7 @@ var rootCmd = &cobra.Command{
 			appConfig.PollingIntervalSeconds,
 			appConfig.AnchoreDetails,
 			appConfig.Region,
-			appConfig.AssumeRoleARN,
-			appConfig.ExternalID,
+			appConfig.AssumeRole,
 			appConfig.Quiet,
 			appConfig.DryRun,
 		)
@@ -83,22 +79,6 @@ func init() {
 	opt = "region"
 	rootCmd.Flags().
 		StringP(opt, "r", config.DefaultConfigValues.Region, "if set overrides the AWS_REGION environment variable/region specified in anchore-ecs-inventory config")
-	if err := viper.BindPFlag(opt, rootCmd.Flags().Lookup(opt)); err != nil {
-		fmt.Printf("unable to bind flag '%s': %+v", opt, err)
-		os.Exit(1)
-	}
-
-	opt = "assume-role-arn"
-	rootCmd.Flags().
-		StringP(opt, "a", config.DefaultConfigValues.AssumeRoleARN, "if set, the ARN of an IAM role to assume (via STS) before querying ECS; may be in the same or a different AWS account")
-	if err := viper.BindPFlag(opt, rootCmd.Flags().Lookup(opt)); err != nil {
-		fmt.Printf("unable to bind flag '%s': %+v", opt, err)
-		os.Exit(1)
-	}
-
-	opt = "external-id"
-	rootCmd.Flags().
-		StringP(opt, "e", config.DefaultConfigValues.ExternalID, "optional external ID to use when assuming --assume-role-arn (required by some cross-account role trust policies)")
 	if err := viper.BindPFlag(opt, rootCmd.Flags().Lookup(opt)); err != nil {
 		fmt.Printf("unable to bind flag '%s': %+v", opt, err)
 		os.Exit(1)

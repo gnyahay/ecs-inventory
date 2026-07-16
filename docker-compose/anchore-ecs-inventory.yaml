@@ -22,19 +22,25 @@ anchore:
     insecure: true
     timeout-seconds: 10
 
-# the aws region
+# the aws region to inventory using the agent's own credentials. Used only when no
+# assume-role entries are configured below. May be empty, in which case the AWS SDK
+# resolves the region (e.g. from AWS_REGION or instance metadata).
 region: $ANCHORE_ECS_INVENTORY_REGION
 
-# optional - the ARN of an IAM role to assume (via STS) before querying ECS.
-# May be in the same or a different AWS account. Leave empty to use the
-# ambient credentials directly. Override via the ANCHORE_ECS_INVENTORY_ASSUME_ROLE_ARN
-# environment variable or the --assume-role-arn flag.
-assume-role-arn: ""
-
-# optional - external ID to use when assuming assume-role-arn (only needed if
-# the target role's trust policy requires it). Override via the
-# ANCHORE_ECS_INVENTORY_EXTERNAL_ID environment variable or the --external-id flag.
-external-id: ""
+# optional - roles to assume (via STS) before querying ECS. Zero entries (the default)
+# inventories the agent's own account using the region above. Each entry produces an
+# independent inventory pass, so a single agent can cover multiple account-regions. A
+# role may be in the same or a different AWS account, provided its trust policy allows
+# the agent's credentials to assume it. This list can only be set via a config file
+# (it cannot be populated from environment variables).
+#
+# assume-role:
+#   - role-arn: arn:aws:iam::123456789012:role/anchore-ecs-inventory
+#     # region to inventory using the assumed credentials
+#     region: us-east-1
+#     # optional - external ID, only if the role's trust policy requires it
+#     external-id: ""
+assume-role: []
 
 # frequency of which to poll the region
 polling-interval-seconds: 300

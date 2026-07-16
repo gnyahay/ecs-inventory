@@ -98,8 +98,7 @@ anchoredetails:
     insecure: false
     timeoutseconds: 0
 region: ""
-assumerolearn: ""
-externalid: ""
+assumerole: []
 quiet: false
 dryrun: false
 `
@@ -154,6 +153,34 @@ func TestCliOptsOverrideConfigFileOpts(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, expectedRegion, appCfg.Region)
+}
+
+func TestAssumeRoleListParsedFromFile(t *testing.T) {
+	t.Cleanup(cleanup)
+
+	cliOpts := CliOnlyOptions{
+		ConfigPath: "testdata/assume-role-config.yaml",
+	}
+	appCfg, err := LoadConfigFromFile(viper.GetViper(), &cliOpts)
+
+	assert.NoError(t, err)
+	assert.Equal(t, []AssumeRoleConfig{
+		{RoleARN: "arn:aws:iam::111111111111:role/a", ExternalID: "ext-a", Region: "us-west-2"},
+		{RoleARN: "arn:aws:iam::222222222222:role/b", Region: "eu-west-1"},
+	}, appCfg.AssumeRole)
+}
+
+func TestAssumeRoleEntryRequiresRoleARN(t *testing.T) {
+	t.Cleanup(cleanup)
+
+	cfg := AppConfig{
+		AssumeRole: []AssumeRoleConfig{
+			{Region: "us-west-2"}, // missing role-arn
+		},
+	}
+
+	err := cfg.Build()
+	assert.ErrorContains(t, err, "assume-role entry 0 is missing a required role-arn")
 }
 
 func cleanup() {

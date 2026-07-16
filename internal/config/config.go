@@ -37,16 +37,31 @@ type AppConfig struct {
 	CliOptions             CliOnlyOptions
 	PollingIntervalSeconds int                    `mapstructure:"polling-interval-seconds"`
 	AnchoreDetails         connection.AnchoreInfo `mapstructure:"anchore"`
-	Region                 string                 `mapstructure:"region"`
-	// AssumeRoleARN, if set, is the ARN of an IAM role that anchore-ecs-inventory will assume (via STS)
-	// before querying ECS. The role may live in the same AWS account or a different one, provided the
-	// role's trust policy permits the base credentials to assume it.
-	AssumeRoleARN string `mapstructure:"assume-role-arn"`
-	// ExternalID, if set, is passed when assuming AssumeRoleARN. Some roles (commonly cross-account,
-	// third-party roles) require an external ID in their trust policy. Ignored when AssumeRoleARN is empty.
+	// Region is the AWS region to inventory using the agent's ambient credentials. It is used only
+	// when no AssumeRole entries are configured; when assuming roles the region comes from each
+	// AssumeRole entry instead. May be empty, in which case the AWS SDK resolves the region normally
+	// (e.g. from AWS_REGION or instance metadata).
+	Region string `mapstructure:"region"`
+	// AssumeRole is a list of roles to assume (via STS), each producing an independent inventory pass.
+	// Zero entries means inventory the agent's own account/Region directly. One or more entries lets a
+	// single agent cover multiple account-regions. Each role may live in the same or a different AWS
+	// account, provided its trust policy permits the agent's base credentials to assume it.
+	AssumeRole []AssumeRoleConfig `mapstructure:"assume-role"`
+	Quiet      bool               `mapstructure:"quiet"`   // if true do not log the inventory report to stdout
+	DryRun     bool               `mapstructure:"dry-run"` // if true do not report inventory to Anchore
+}
+
+// AssumeRoleConfig describes a single IAM role to assume and the region to inventory using the
+// resulting credentials.
+type AssumeRoleConfig struct {
+	// RoleARN is the ARN of the IAM role to assume. Required for each entry.
+	RoleARN string `mapstructure:"role-arn"`
+	// Region is the AWS region to inventory using the assumed credentials. May be empty, in which
+	// case the AWS SDK resolves the region normally.
+	Region string `mapstructure:"region"`
+	// ExternalID, if set, is passed when assuming the role. Some roles (commonly cross-account,
+	// third-party roles) require an external ID in their trust policy. Optional.
 	ExternalID string `mapstructure:"external-id"`
-	Quiet      bool   `mapstructure:"quiet"`   // if true do not log the inventory report to stdout
-	DryRun     bool   `mapstructure:"dry-run"` // if true do not report inventory to Anchore
 }
 
 // Logging Configuration
@@ -68,8 +83,7 @@ var DefaultConfigValues = AppConfig{
 		},
 	},
 	Region:                 "",
-	AssumeRoleARN:          "",
-	ExternalID:             "",
+	AssumeRole:             nil,
 	PollingIntervalSeconds: 300,
 	Quiet:                  false,
 	DryRun:                 false,
@@ -139,6 +153,13 @@ func (cfg *AppConfig) Build() error {
 			cfg.Log.Level = "debug"
 		default:
 			cfg.Log.Level = "info"
+		}
+	}
+
+	// Each assume-role entry must specify a role ARN; a bare entry is a configuration mistake.
+	for i, role := range cfg.AssumeRole {
+		if role.RoleARN == "" {
+			return fmt.Errorf("assume-role entry %d is missing a required role-arn", i)
 		}
 	}
 
