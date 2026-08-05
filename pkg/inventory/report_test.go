@@ -7,10 +7,13 @@ import (
 	"os"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/h2non/gock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/anchore/ecs-inventory/internal"
 	"github.com/anchore/ecs-inventory/internal/logger"
 	"github.com/anchore/ecs-inventory/pkg/connection"
 	"github.com/anchore/ecs-inventory/pkg/reporter"
@@ -20,10 +23,48 @@ func init() {
 	logger.Log = &logger.NoOpLogger{}
 }
 
+func TestConfigureAssumeRoleSetsCredentialsCacheWhenARNSet(t *testing.T) {
+	// A non-empty ARN should swap in an STS assume-role credentials cache.
+	base := aws.Config{}
+	cfg, assumed := configureAssumeRole(base, "arn:aws:iam::123456789012:role/foo", "ext-id")
+
+	assert.True(t, assumed)
+	_, ok := cfg.Credentials.(*aws.CredentialsCache)
+	assert.True(t, ok, "expected credentials to be an *aws.CredentialsCache")
+}
+
+func TestConfigureAssumeRoleSkippedWhenNoARN(t *testing.T) {
+	// With no ARN the config is returned untouched so ambient credentials are used.
+	base := aws.Config{}
+	cfg, assumed := configureAssumeRole(base, "", "")
+
+	assert.False(t, assumed)
+	assert.Nil(t, cfg.Credentials, "expected credentials to be left unchanged when no role is assumed")
+}
+
+func TestAssumeRoleOptionsCarryARNSessionAndExternalID(t *testing.T) {
+	// External ID is passed through to the STS options when set.
+	var opts stscreds.AssumeRoleOptions
+	assumeRoleOptionsFor("ext-id")(&opts)
+
+	assert.Equal(t, internal.ApplicationName, opts.RoleSessionName)
+	require.NotNil(t, opts.ExternalID)
+	assert.Equal(t, "ext-id", *opts.ExternalID)
+}
+
+func TestAssumeRoleOptionsOmitEmptyExternalID(t *testing.T) {
+	// An empty external ID must not be sent (nil), since AWS rejects a blank value.
+	var opts stscreds.AssumeRoleOptions
+	assumeRoleOptionsFor("")(&opts)
+
+	assert.Equal(t, internal.ApplicationName, opts.RoleSessionName)
+	assert.Nil(t, opts.ExternalID)
+}
+
 func TestGetInventoryReportForCluster(t *testing.T) {
 	mockSvc := &mockECSClient{}
 
-	report, err := GetInventoryReportForCluster(context.Background(), "cluster-1", mockSvc)
+	report, err := GetInventoryReportForCluster(context.Background(), "cluster-1", mockSvc, "")
 
 	assert.NoError(t, err)
 	assert.Equal(t, 4, len(report.Containers))

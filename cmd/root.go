@@ -14,8 +14,6 @@ import (
 	"github.com/anchore/ecs-inventory/pkg/reporter"
 )
 
-var ErrMissingDefaultConfigValue = fmt.Errorf("missing default config value")
-
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "anchore-ecs-inventory",
@@ -33,13 +31,12 @@ var rootCmd = &cobra.Command{
 		}
 		log.Info("Starting anchore-ecs-inventory")
 
-		// Check required config values are present
-		if appConfig.Region == "" {
-			log.Error(
-				"AWS region not specified, please set the ANCHORE_ECS_INVENTORY_REGION environment variable, use the --region flag, or specify a region in the config file",
-				ErrMissingDefaultConfigValue,
+		// Region is optional. When no roles are assumed and no region is set, warn but continue -
+		// the AWS SDK may still resolve a region from the environment or instance metadata.
+		if appConfig.Region == "" && len(appConfig.AssumeRole) == 0 {
+			log.Warn(
+				"No region or assume-role configured; relying on AWS SDK default region resolution (e.g. AWS_REGION or instance metadata)",
 			)
-			os.Exit(1)
 		}
 
 		// Validate anchore connection & credentials, using a dummy report to post but this will be
@@ -59,13 +56,20 @@ var rootCmd = &cobra.Command{
 			log.Warn("Anchore details not specified, will not report inventory")
 		}
 
-		pkg.PeriodicallyGetInventoryReport(
+		// PeriodicallyGetInventoryReport only returns if startup pre-flight validation fails; a
+		// healthy agent blocks here forever. Exit non-zero on pre-flight failure so ECS surfaces
+		// the misconfiguration (e.g. via task restarts/alarms) instead of running blind.
+		if err := pkg.PeriodicallyGetInventoryReport(
 			appConfig.PollingIntervalSeconds,
 			appConfig.AnchoreDetails,
 			appConfig.Region,
+			appConfig.AssumeRole,
 			appConfig.Quiet,
 			appConfig.DryRun,
-		)
+		); err != nil {
+			log.Error("Shutting down: assume-role pre-flight validation failed", err)
+			os.Exit(1)
+		}
 	},
 }
 
